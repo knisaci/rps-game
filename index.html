@@ -84,153 +84,175 @@ body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:1
   <div class="log" id="log"></div>
 </div>
 
-<script type="module">
-import { AppConfig, UserSession, showConnect, openContractCall } from 'https://esm.sh/@stacks/connect@7.10.1';
-import { uintCV } from 'https://esm.sh/@stacks/transactions@6.16.1';
+<script>
+const CONTRACT_ADDRESS = 'ST7JHH38BKGBC4Y5TFB725EJFYSNEGHK6XFB84AC';
+const CONTRACT_NAME = 'rock-paper-scissors';
+const API = 'https://api.testnet.hiro.so';
+const EMOJIS = ['🪨','📄','✂️'];
+const NAMES = ['Rock','Paper','Scissors'];
 
-const CONTRACT_ADDRESS='ST7JHH38BKGBC4Y5TFB725EJFYSNEGHK6XFB84AC';
-const CONTRACT_NAME='rock-paper-scissors';
-const API='https://api.testnet.hiro.so';
-const EMOJIS=['🪨','📄','✂️'];
-const NAMES=['Rock','Paper','Scissors'];
+let selectedMove = null;
+let userAddress = null;
+let provider = null;
 
-const appConfig = new AppConfig(['store_write','publish_data']);
-const userSession = new UserSession({ appConfig });
-
-let selectedMove=null, userAddress=null;
-
-window.selectMove = function(move, btn) {
-  selectedMove=move;
-  document.querySelectorAll('.move-btn').forEach(b=>b.classList.remove('selected'));
-  btn.classList.add('selected');
-  const p=document.getElementById('play-btn');
-  p.disabled=false;
-  p.textContent=`Play ${NAMES[move]}`;
+function getProvider() {
+  return window.LeatherProvider || window.StacksProvider || null;
 }
 
-window.connectWallet = function() {
-  setLog('Opening wallet...');
-  showConnect({
-    appDetails:{name:'RPS Game', icon:'https://knisaci.github.io/rps-game/favicon.ico'},
-    userSession,
-    onFinish: () => {
-      const userData = userSession.loadUserData();
-      userAddress = userData.profile.stxAddress.testnet;
-      const short = userAddress.slice(0,6)+'...'+userAddress.slice(-4);
-      document.getElementById('addr-display').innerHTML=`Connected: <span>${short}</span>`;
-      document.getElementById('connect-btn').textContent='Connected';
-      setLog('Connected! Fetching score...');
-      fetchScore();
-    },
-    onCancel: () => setLog('Cancelled.')
-  });
+function selectMove(move, btn) {
+  selectedMove = move;
+  document.querySelectorAll('.move-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const p = document.getElementById('play-btn');
+  p.disabled = false;
+  p.textContent = `Play ${NAMES[move]}`;
+}
+
+async function connectWallet() {
+  provider = getProvider();
+  if (!provider) {
+    setLog('Leather wallet not found — install from leather.io');
+    return;
+  }
+  setLog('Requesting accounts...');
+  try {
+    const resp = await provider.request('getAddresses');
+    const addresses = resp?.result?.addresses || [];
+    // pick testnet (ST...) address
+    const stx = addresses.find(a => a.address?.startsWith('ST')) || addresses.find(a => a.symbol === 'STX');
+    if (!stx) { setLog('No STX address found. Switch Leather to Testnet.'); return; }
+    userAddress = stx.address;
+    const short = userAddress.slice(0,6) + '...' + userAddress.slice(-4);
+    document.getElementById('addr-display').innerHTML = `Connected: <span>${short}</span>`;
+    document.getElementById('connect-btn').textContent = 'Connected';
+    setLog('Connected! Fetching score...');
+    await fetchScore();
+  } catch(e) {
+    setLog('Connection error: ' + e.message);
+  }
 }
 
 async function fetchScore() {
-  if(!userAddress) return;
+  if (!userAddress) return;
   try {
-    const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({sender:userAddress, arguments:[]})
+    const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender: userAddress, arguments: [] })
     });
     const data = await res.json();
-    if(data.result){
-      const w=data.result.match(/wins:\su(\d+)/);
-      const l=data.result.match(/losses:\su(\d+)/);
-      const d=data.result.match(/draws:\su(\d+)/);
-      if(w){
-        document.getElementById('score-wins').textContent=w[1];
-        document.getElementById('score-losses').textContent=l?.[1]||0;
-        document.getElementById('score-draws').textContent=d?.[1]||0;
+    if (data.result) {
+      const w = data.result.match(/wins:\su(\d+)/);
+      const l = data.result.match(/losses:\su(\d+)/);
+      const d = data.result.match(/draws:\su(\d+)/);
+      if (w) {
+        document.getElementById('score-wins').textContent = w[1];
+        document.getElementById('score-losses').textContent = l?.[1] || 0;
+        document.getElementById('score-draws').textContent = d?.[1] || 0;
       }
     }
-  } catch(e) { setLog('Could not fetch score.'); }
+  } catch(e) {}
 }
 
-window.play = async function() {
-  if(selectedMove===null){setLog('Pick a move first!');return;}
-  if(!userAddress){setLog('Connect your wallet first!');return;}
-  setLog('Opening wallet to confirm...');
-  document.getElementById('play-btn').disabled=true;
+async function play() {
+  if (selectedMove === null) { setLog('Pick a move first!'); return; }
+  if (!userAddress) { setLog('Connect your wallet first!'); return; }
+  provider = getProvider();
+  if (!provider) { setLog('Leather wallet not found!'); return; }
+
+  setLog('Confirm in your Leather wallet...');
+  document.getElementById('play-btn').disabled = true;
   showBattle(selectedMove, null, null);
 
-  openContractCall({
-    network: 'testnet',
-    contractAddress: CONTRACT_ADDRESS,
-    contractName: CONTRACT_NAME,
-    functionName: 'play',
-    functionArgs: [uintCV(selectedMove)],
-    postConditions: [],
-    userSession,
-    onFinish: (data) => {
-      setLog(`Tx: ${data.txId.slice(0,16)}... waiting for block...`);
-      pollTx(data.txId);
-    },
-    onCancel: () => {
-      setLog('Transaction cancelled.');
-      document.getElementById('play-btn').disabled=false;
+  // Encode uint using Clarity value serialization
+  // uintCV(n) = 0x01 + 16-byte big-endian
+  const moveHex = selectedMove.toString(16).padStart(32, '0');
+  const uintArg = '0x01' + moveHex;
+
+  try {
+    const resp = await provider.request('stx_callContract', {
+      contractAddress: CONTRACT_ADDRESS,
+      contractName: CONTRACT_NAME,
+      functionName: 'play',
+      functionArgs: [uintArg],
+      network: 'testnet',
+      postConditions: [],
+      postConditionMode: 'allow'
+    });
+
+    const txId = resp?.result?.txid || resp?.result?.txId;
+    if (txId) {
+      setLog(`Tx submitted! Waiting for block...`);
+      await pollTx(txId);
+    } else {
+      setLog('No txId returned. Cancelled?');
+      document.getElementById('play-btn').disabled = false;
     }
-  });
+  } catch(e) {
+    setLog('Error: ' + (e.message || JSON.stringify(e)));
+    document.getElementById('play-btn').disabled = false;
+  }
 }
 
 async function pollTx(txId) {
-  for(let i=0;i<30;i++){
+  for (let i = 0; i < 30; i++) {
     await sleep(5000);
-    try{
-      const res=await fetch(`${API}/extended/v1/tx/${txId}`);
-      const data=await res.json();
-      if(data.tx_status==='success'){
-        const r=parseResult(data);
-        if(r) showBattle(selectedMove,r.contract,r.result);
+    try {
+      const res = await fetch(`${API}/extended/v1/tx/${txId}`);
+      const data = await res.json();
+      if (data.tx_status === 'success') {
+        const r = parseResult(data);
+        if (r) showBattle(selectedMove, r.contract, r.result);
         await fetchScore();
-        setLog('Done! '+(r?.result===1?'🎉 You win!':r?.result===2?'Contract wins.':'Draw!'));
-        document.getElementById('play-btn').disabled=false;
+        setLog('Done! ' + (r?.result === 1 ? '🎉 You win!' : r?.result === 2 ? 'Contract wins.' : 'Draw!'));
+        document.getElementById('play-btn').disabled = false;
         return;
-      } else if(data.tx_status?.startsWith('abort')){
+      } else if (data.tx_status?.startsWith('abort')) {
         setLog('Transaction aborted.');
-        document.getElementById('play-btn').disabled=false;
+        document.getElementById('play-btn').disabled = false;
         return;
       }
-    } catch(e){}
+    } catch(e) {}
     setLog(`Waiting for block... (${i+1}/30)`);
   }
-  setLog('Timed out. Check explorer.');
-  document.getElementById('play-btn').disabled=false;
+  setLog('Timed out. Check the Stacks explorer.');
+  document.getElementById('play-btn').disabled = false;
 }
 
-function parseResult(d){
-  try{
-    const r=d?.tx_result?.repr||'';
-    const p=r.match(/player:\su(\d)/);
-    const c=r.match(/contract:\su(\d)/);
-    const res=r.match(/result:\su(\d)/);
-    if(p&&c&&res) return{player:parseInt(p[1]),contract:parseInt(c[1]),result:parseInt(res[1])};
-  }catch(e){}
+function parseResult(d) {
+  try {
+    const r = d?.tx_result?.repr || '';
+    const p = r.match(/player:\su(\d)/);
+    const c = r.match(/contract:\su(\d)/);
+    const res = r.match(/result:\su(\d)/);
+    if (p && c && res) return { player: parseInt(p[1]), contract: parseInt(c[1]), result: parseInt(res[1]) };
+  } catch(e) {}
   return null;
 }
 
-function showBattle(p,c,result){
-  document.getElementById('idle-view').style.display='none';
-  document.getElementById('battle-view').style.display='flex';
-  document.getElementById('player-emoji').textContent=EMOJIS[p];
-  document.getElementById('contract-emoji').textContent=c!==null?EMOJIS[c]:'❓';
-  ['player-emoji','contract-emoji'].forEach(id=>{
-    const el=document.getElementById(id);
+function showBattle(p, c, result) {
+  document.getElementById('idle-view').style.display = 'none';
+  document.getElementById('battle-view').style.display = 'flex';
+  document.getElementById('player-emoji').textContent = EMOJIS[p];
+  document.getElementById('contract-emoji').textContent = c !== null ? EMOJIS[c] : '❓';
+  ['player-emoji','contract-emoji'].forEach(id => {
+    const el = document.getElementById(id);
     el.classList.remove('pop');
     void el.offsetWidth;
     el.classList.add('pop');
   });
-  const badge=document.getElementById('result-badge');
-  if(result!==null){
-    badge.style.display='block';
-    badge.className='result-badge '+(result===1?'win':result===2?'lose':'draw');
-    badge.textContent=result===1?'You Win!':result===2?'You Lose':'Draw';
-  } else badge.style.display='none';
+  const badge = document.getElementById('result-badge');
+  if (result !== null) {
+    badge.style.display = 'block';
+    badge.className = 'result-badge ' + (result === 1 ? 'win' : result === 2 ? 'lose' : 'draw');
+    badge.textContent = result === 1 ? 'You Win!' : result === 2 ? 'You Lose' : 'Draw';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
-function setLog(msg){document.getElementById('log').textContent=msg;}
-function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+function setLog(msg) { document.getElementById('log').textContent = msg; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 </script>
 </body>
 </html>
