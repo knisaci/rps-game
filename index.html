@@ -141,6 +141,7 @@ async function fetchScore() {
       body: JSON.stringify({ sender: userAddress, arguments: [] })
     });
     const data = await res.json();
+    console.log('RAW RESULT:', JSON.stringify(data));
     if (data.result) {
      const w = data.result.match(/wins:\s*u(\d+)/);
      const l = data.result.match(/losses:\s*u(\d+)/);
