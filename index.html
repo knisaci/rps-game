@@ -26,7 +26,7 @@ body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:1
 .fighter .emoji{font-size:3rem;display:block;margin-bottom:0.5rem}
 .fighter .name{font-family:'Space Mono',monospace;font-size:0.65rem;letter-spacing:2px;text-transform:uppercase;color:#444}
 .vs{font-weight:800;font-size:1.2rem;color:#222}
-.result-badge{text-align:center;padding:0.5rem 1.5rem;border-radius:999px;font-family:'Space Mono',monospace;font-size:0.75rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;display:none}
+.result-badge{text-align:center;padding:0.5rem 1.5rem;border-radius:999px;font-family:'Space Mono',monospace;font-size:0.75rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;display:none;margin-top:0.5rem}
 .result-badge.win{background:#7fff6e22;color:#7fff6e;border:1px solid #7fff6e44}
 .result-badge.lose{background:#ff6e6e22;color:#ff6e6e;border:1px solid #ff6e6e44}
 .result-badge.draw{background:#6ebbff22;color:#6ebbff;border:1px solid #6ebbff44}
@@ -90,13 +90,43 @@ const CONTRACT_NAME = 'rock-paper-scissors';
 const API = 'https://api.testnet.hiro.so';
 const EMOJIS = ['🪨','📄','✂️'];
 const NAMES = ['Rock','Paper','Scissors'];
+let selectedMove = null, userAddress = null;
 
-let selectedMove = null;
-let userAddress = null;
-let provider = null;
+// Encode STX address as Clarity principal hex
+function encodeAddress(addr) {
+  const alpha = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let num = BigInt(0);
+  for (const c of addr) num = num * BigInt(58) + BigInt(alpha.indexOf(c));
+  let h = num.toString(16);
+  if (h.length % 2) h = '0' + h;
+  while (h.length < 50) h = '00' + h;
+  // bytes 1-20 (skip version byte 0, skip 4 checksum bytes at end)
+  const hash160 = h.slice(2, 42);
+  return '0x0516' + hash160;
+}
 
-function getProvider() {
-  return window.LeatherProvider || window.StacksProvider || null;
+// Decode Clarity tuple hex into {wins, losses, draws}
+function decodeTuple(hex) {
+  try {
+    const h = hex.startsWith('0x') ? hex.slice(2) : hex;
+    let i = 10; // skip type (0c) + field count (00000003)
+    const fields = {};
+    for (let f = 0; f < 3; f++) {
+      const nameLen = parseInt(h.slice(i, i+2), 16); i += 2;
+      const name = atob ? '' : '';
+      let nameStr = '';
+      for (let n = 0; n < nameLen; n++) {
+        nameStr += String.fromCharCode(parseInt(h.slice(i, i+2), 16));
+        i += 2;
+      }
+      const valType = h.slice(i, i+2); i += 2;
+      if (valType === '01') { // uint128
+        fields[nameStr] = parseInt(h.slice(i, i+32), 16);
+        i += 32;
+      }
+    }
+    return fields;
+  } catch(e) { return null; }
 }
 
 function selectMove(move, btn) {
@@ -109,68 +139,56 @@ function selectMove(move, btn) {
 }
 
 async function connectWallet() {
-  provider = getProvider();
-  if (!provider) {
-    setLog('Leather wallet not found — install from leather.io');
-    return;
-  }
+  const provider = window.LeatherProvider || window.StacksProvider;
+  if (!provider) { setLog('Leather wallet not found — install from leather.io'); return; }
   setLog('Requesting accounts...');
   try {
     const resp = await provider.request('getAddresses');
     const addresses = resp?.result?.addresses || [];
-    // pick testnet (ST...) address
     const stx = addresses.find(a => a.address?.startsWith('ST')) || addresses.find(a => a.symbol === 'STX');
-    if (!stx) { setLog('No STX address found. Switch Leather to Testnet.'); return; }
+    if (!stx) { setLog('No testnet address found. Switch Leather to Testnet.'); return; }
     userAddress = stx.address;
     const short = userAddress.slice(0,6) + '...' + userAddress.slice(-4);
     document.getElementById('addr-display').innerHTML = `Connected: <span>${short}</span>`;
     document.getElementById('connect-btn').textContent = 'Connected';
-    setLog('Connected! Fetching score...');
+    setLog('Connected!');
     await fetchScore();
-  } catch(e) {
-    setLog('Connection error: ' + e.message);
-  }
+  } catch(e) { setLog('Error: ' + e.message); }
 }
 
 async function fetchScore() {
   if (!userAddress) return;
   try {
+    const encoded = encodeAddress(userAddress);
     const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: userAddress, arguments: ['0x0516309ce2707bcf50611e0af3fedb8465c2be0373a3'] })
+      body: JSON.stringify({ sender: userAddress, arguments: [encoded] })
     });
     const data = await res.json();
     if (data.okay && data.result) {
-      const hex = data.result.slice(2);
-      const wins = parseInt(hex.slice(hex.indexOf('77696e73') + 8 + 4, hex.indexOf('77696e73') + 8 + 4 + 32), 16);
-      const losses = parseInt(hex.slice(hex.indexOf('6c6f7373657373') + 14 + 4, hex.indexOf('6c6f7373657373') + 14 + 4 + 32), 16);
-      const draws = parseInt(hex.slice(hex.indexOf('6472617773') + 10 + 4, hex.indexOf('6472617773') + 10 + 4 + 32), 16);
-      document.getElementById('score-wins').textContent = wins;
-      document.getElementById('score-losses').textContent = losses;
-      document.getElementById('score-draws').textContent = draws;
+      const scores = decodeTuple(data.result);
+      if (scores) {
+        document.getElementById('score-wins').textContent = scores.wins || 0;
+        document.getElementById('score-losses').textContent = scores.losses || 0;
+        document.getElementById('score-draws').textContent = scores.draws || 0;
+      }
     }
   } catch(e) { console.log('fetchScore error', e); }
 }
 
-
 async function play() {
   if (selectedMove === null) { setLog('Pick a move first!'); return; }
   if (!userAddress) { setLog('Connect your wallet first!'); return; }
-  provider = getProvider();
+  const provider = window.LeatherProvider || window.StacksProvider;
   if (!provider) { setLog('Leather wallet not found!'); return; }
-
-  setLog('Confirm in your Leather wallet...');
+  setLog('Confirm in Leather wallet...');
   document.getElementById('play-btn').disabled = true;
   showBattle(selectedMove, null, null);
-
-  // Encode uint using Clarity value serialization
-  // uintCV(n) = 0x01 + 16-byte big-endian
-  const moveHex = selectedMove.toString(16).padStart(32, '0');
-  const uintArg = '0x01' + moveHex;
-
+  // encode uint: 0x01 + 16 bytes big-endian
+  const uintArg = '0x01' + selectedMove.toString(16).padStart(32, '0');
   try {
-  const resp = await provider.request('stx_callContract', {
+    const resp = await provider.request('stx_callContract', {
       contract: `${CONTRACT_ADDRESS}.${CONTRACT_NAME}`,
       functionName: 'play',
       functionArgs: [uintArg],
@@ -178,13 +196,12 @@ async function play() {
       postConditions: [],
       postConditionMode: 'allow'
     });
-
     const txId = resp?.result?.txid || resp?.result?.txId;
     if (txId) {
-      setLog(`Tx submitted! Waiting for block...`);
+      setLog('Tx submitted! Waiting for block...');
       await pollTx(txId);
     } else {
-      setLog('No txId returned. Cancelled?');
+      setLog('Cancelled.');
       document.getElementById('play-btn').disabled = false;
     }
   } catch(e) {
@@ -203,7 +220,7 @@ async function pollTx(txId) {
         const r = parseResult(data);
         if (r) showBattle(selectedMove, r.contract, r.result);
         await fetchScore();
-        setLog('Done! ' + (r?.result === 1 ? '🎉 You win!' : r?.result === 2 ? 'Contract wins.' : 'Draw!'));
+        setLog(r?.result === 1 ? '🎉 You win!' : r?.result === 2 ? 'Contract wins.' : 'Draw!');
         document.getElementById('play-btn').disabled = false;
         return;
       } else if (data.tx_status?.startsWith('abort')) {
@@ -214,17 +231,17 @@ async function pollTx(txId) {
     } catch(e) {}
     setLog(`Waiting for block... (${i+1}/30)`);
   }
-  setLog('Timed out. Check the Stacks explorer.');
+  setLog('Timed out. Check explorer.');
   document.getElementById('play-btn').disabled = false;
 }
 
 function parseResult(d) {
   try {
-    const r = d?.tx_result?.repr || '';
-    const p = r.match(/player:\su(\d)/);
-    const c = r.match(/contract:\su(\d)/);
-    const res = r.match(/result:\su(\d)/);
-    if (p && c && res) return { player: parseInt(p[1]), contract: parseInt(c[1]), result: parseInt(res[1]) };
+    const repr = d?.tx_result?.repr || '';
+    const p = repr.match(/player:\su(\d)/);
+    const c = repr.match(/contract:\su(\d)/);
+    const r = repr.match(/result:\su(\d)/);
+    if (p && c && r) return { player: parseInt(p[1]), contract: parseInt(c[1]), result: parseInt(r[1]) };
   } catch(e) {}
   return null;
 }
