@@ -94,6 +94,7 @@ const EMOJIS = ['🪨','📄','✂️'];
 const NAMES = ['Rock','Paper','Scissors'];
 let selectedMove = null, userAddress = null;
 
+// Encode STX address as Clarity principal hex
 function encodeAddress(addr) {
   const alpha = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   let num = BigInt(0);
@@ -108,7 +109,7 @@ function encodeAddress(addr) {
 function decodeTuple(hex) {
   try {
     const h = hex.startsWith('0x') ? hex.slice(2) : hex;
-    let i = 10; // skip 0c (tuple) + 00000003 (3 fields)
+    let i = 10;
     const fields = {};
     for (let f = 0; f < 3; f++) {
       const nameLen = parseInt(h.slice(i, i+2), 16); i += 2;
@@ -123,9 +124,21 @@ function decodeTuple(hex) {
         i += 32;
       }
     }
-    console.log('Decoded scores:', fields);
     return fields;
-  } catch(e) { console.log('decodeTuple error:', e); return null; }
+  } catch(e) { return null; }
+}
+
+// Parse tx result repr: (ok (tuple (contract u1) (player u1) (result u0)))
+function parseRepr(repr) {
+  try {
+    const pm = repr.match(/\(player u(\d+)\)/);
+    const cm = repr.match(/\(contract u(\d+)\)/);
+    const rm = repr.match(/\(result u(\d+)\)/);
+    if (pm && cm && rm) {
+      return { player: parseInt(pm[1]), contract: parseInt(cm[1]), result: parseInt(rm[1]) };
+    }
+  } catch(e) {}
+  return null;
 }
 
 function selectMove(move, btn) {
@@ -143,13 +156,10 @@ async function connectWallet() {
   setLog('Requesting accounts...');
   try {
     const resp = await provider.request('getAddresses');
-    console.log('getAddresses response:', JSON.stringify(resp));
     const addresses = resp?.result?.addresses || [];
     const stx = addresses.find(a => a.address?.startsWith('SP')) || addresses.find(a => a.symbol === 'STX');
     if (!stx) { setLog('No mainnet STX address found. Switch Leather to Mainnet.'); return; }
     userAddress = stx.address;
-    console.log('Connected address:', userAddress);
-    console.log('Encoded:', encodeAddress(userAddress));
     const short = userAddress.slice(0,6) + '...' + userAddress.slice(-4);
     document.getElementById('addr-display').innerHTML = `Connected: <span>${short}</span>`;
     document.getElementById('connect-btn').textContent = 'Connected';
@@ -162,14 +172,12 @@ async function fetchScore() {
   if (!userAddress) return;
   try {
     const encoded = encodeAddress(userAddress);
-    console.log('Fetching score for:', userAddress, 'encoded:', encoded);
     const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sender: userAddress, arguments: [encoded] })
     });
     const data = await res.json();
-    console.log('Score API response:', JSON.stringify(data));
     if (data.okay && data.result) {
       const scores = decodeTuple(data.result);
       if (scores) {
@@ -199,7 +207,6 @@ async function play() {
       postConditions: [],
       postConditionMode: 'allow'
     });
-    console.log('stx_callContract response:', JSON.stringify(resp));
     const txId = resp?.result?.txid || resp?.result?.txId;
     if (txId) {
       setLog('Tx submitted! Waiting for block...');
@@ -220,20 +227,12 @@ async function pollTx(txId) {
     try {
       const res = await fetch(`${API}/extended/v1/tx/${txId}`);
       const data = await res.json();
-      console.log('TX status:', data.tx_status, 'repr:', data?.tx_result?.repr);
       if (data.tx_status === 'success') {
         const repr = data?.tx_result?.repr || '';
-        console.log('Full repr:', repr);
-        // parse (ok {player: u0, contract: u2, result: u1})
-        const pm = repr.match(/player:\s*u(\d+)/);
-        const cm = repr.match(/contract:\s*u(\d+)/);
-        const rm = repr.match(/result:\s*u(\d+)/);
-        console.log('Parsed - player:', pm?.[1], 'contract:', cm?.[1], 'result:', rm?.[1]);
-        if (pm && cm && rm) {
-          showBattle(parseInt(pm[1]), parseInt(cm[1]), parseInt(rm[1]));
-        }
+        const r = parseRepr(repr);
+        if (r) showBattle(r.player, r.contract, r.result);
         await fetchScore();
-        const result = rm ? parseInt(rm[1]) : -1;
+        const result = r?.result;
         setLog(result === 1 ? '🎉 You win!' : result === 2 ? 'Contract wins.' : result === 0 ? 'Draw!' : 'Done!');
         document.getElementById('play-btn').disabled = false;
         return;
@@ -242,7 +241,7 @@ async function pollTx(txId) {
         document.getElementById('play-btn').disabled = false;
         return;
       }
-    } catch(e) { console.log('pollTx error:', e); }
+    } catch(e) {}
     setLog(`Waiting for block... (${i+1}/30)`);
   }
   setLog('Timed out. Check explorer.');
@@ -275,6 +274,3 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 </script>
 </body>
 </html>
-<-bash: SP7JHH38BKGBC4Y5TFB725EJFYSNEGHK6Z39X2B2.rock-paper-scissors-v2: command not found cache bust Thu 30 Apr 2026 20:19:51 AEST -->
-<-bash: SP7JHH38BKGBC4Y5TFB725EJFYSNEGHK6Z39X2B2.rock-paper-scissors-v2: command not found cache bust Thu 30 Apr 2026 20:20:29 AEST -->
-done
