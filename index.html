@@ -138,7 +138,7 @@ async function fetchScore() {
     const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sender: userAddress, arguments: ['0x0516' + Array.from(userAddress).map(c=>c.charCodeAt(0).toString(16).padStart(2,'0')).join('')] })
+      body: JSON.stringify({ sender: userAddress, arguments: ['0x0516309ce2707bcf50611e0af3fedb8465c2be0373a3'] })
     });
     const data = await res.json();
     console.log('RAW RESULT:', JSON.stringify(data));
