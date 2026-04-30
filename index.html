@@ -142,9 +142,9 @@ async function fetchScore() {
     });
     const data = await res.json();
     if (data.result) {
-      const w = data.result.match(/wins:\su(\d+)/);
-      const l = data.result.match(/losses:\su(\d+)/);
-      const d = data.result.match(/draws:\su(\d+)/);
+     const w = data.result.match(/wins:\s*u(\d+)/);
+     const l = data.result.match(/losses:\s*u(\d+)/);
+     const d = data.result.match(/draws:\s*u(\d+)/);
       if (w) {
         document.getElementById('score-wins').textContent = w[1];
         document.getElementById('score-losses').textContent = l?.[1] || 0;
