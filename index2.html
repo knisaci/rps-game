@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="An on-chain Rock Paper Scissors game built on Stacks — play against the smart contract, every move is recorded on Bitcoin.">
+<meta name="talentapp:project_verification" content="a5d291cf73fcd2bd3887a538bfbcc415f0a63f888b466ebf8b8fc728c1327f304b652b6ff8f5cdb997ffabef7af0c908ad85af6637a3ca0f3b121a4a2d609bdc">
+<title>Rock Paper Scissors — On-Chain</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem}
+.arena{width:100%;max-width:560px}
+.title{text-align:center;margin-bottom:2.5rem}
+.title h1{font-size:2.2rem;font-weight:800;letter-spacing:-1px;color:#e8e8f0;line-height:1}
+.title h1 span{color:#7fff6e}
+.title p{font-family:'Space Mono',monospace;font-size:0.7rem;color:#555;margin-top:0.5rem;letter-spacing:2px;text-transform:uppercase}
+.scoreboard{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:2rem}
+.score-box{background:#111118;border:1px solid #1e1e2e;border-radius:12px;padding:1rem;text-align:center}
+.score-box .label{font-family:'Space Mono',monospace;font-size:0.6rem;letter-spacing:2px;text-transform:uppercase;color:#444;margin-bottom:0.4rem}
+.score-box .value{font-size:1.8rem;font-weight:800}
+.score-box.wins .value{color:#7fff6e}
+.score-box.losses .value{color:#ff6e6e}
+.score-box.draws .value{color:#6ebbff}
+.battle-zone{background:#111118;border:1px solid #1e1e2e;border-radius:16px;padding:1.5rem;margin-bottom:1.5rem;min-height:120px;display:flex;align-items:center;justify-content:center}
+.battle-display{display:flex;align-items:center;gap:1.5rem;width:100%;justify-content:center}
+.fighter{text-align:center;flex:1}
+.fighter .emoji{font-size:3rem;display:block;margin-bottom:0.5rem}
+.fighter .name{font-family:'Space Mono',monospace;font-size:0.65rem;letter-spacing:2px;text-transform:uppercase;color:#444}
+.vs{font-weight:800;font-size:1.2rem;color:#222}
+.result-badge{text-align:center;padding:0.5rem 1.5rem;border-radius:999px;font-family:'Space Mono',monospace;font-size:0.75rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;display:none;margin-top:0.5rem}
+.result-badge.win{background:#7fff6e22;color:#7fff6e;border:1px solid #7fff6e44}
+.result-badge.lose{background:#ff6e6e22;color:#ff6e6e;border:1px solid #ff6e6e44}
+.result-badge.draw{background:#6ebbff22;color:#6ebbff;border:1px solid #6ebbff44}
+.idle-text{font-family:'Space Mono',monospace;font-size:0.7rem;color:#333;letter-spacing:2px;text-transform:uppercase}
+.moves{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:1.5rem}
+.move-btn{background:#111118;border:1px solid #1e1e2e;border-radius:14px;padding:1.2rem 0.5rem;cursor:pointer;text-align:center;transition:all 0.15s;font-family:'Syne',sans-serif}
+.move-btn:hover{border-color:#7fff6e44;background:#15151f;transform:translateY(-2px)}
+.move-btn:active{transform:scale(0.97)}
+.move-btn.selected{border-color:#7fff6e;background:#7fff6e11}
+.move-btn .move-emoji{font-size:2.2rem;display:block;margin-bottom:0.5rem}
+.move-btn .move-name{font-size:0.75rem;font-weight:700;letter-spacing:1px;color:#666;text-transform:uppercase}
+.play-btn{width:100%;background:#7fff6e;color:#0a0a0f;border:none;border-radius:12px;padding:1rem;font-family:'Syne',sans-serif;font-size:1rem;font-weight:800;letter-spacing:1px;cursor:pointer;transition:all 0.15s;text-transform:uppercase}
+.play-btn:hover{background:#9fff8e}
+.play-btn:active{transform:scale(0.98)}
+.play-btn:disabled{background:#1e1e2e;color:#333;cursor:not-allowed}
+.wallet-bar{margin-bottom:1.5rem;background:#111118;border:1px solid #1e1e2e;border-radius:12px;padding:0.75rem 1rem;display:flex;align-items:center;justify-content:space-between}
+.wallet-bar .addr{font-family:'Space Mono',monospace;font-size:0.65rem;color:#444}
+.wallet-bar .addr span{color:#7fff6e}
+.connect-btn{background:transparent;border:1px solid #7fff6e44;color:#7fff6e;border-radius:8px;padding:0.3rem 0.8rem;font-family:'Space Mono',monospace;font-size:0.65rem;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all 0.15s}
+.connect-btn:hover{background:#7fff6e11}
+.log{font-family:'Space Mono',monospace;font-size:0.65rem;color:#555;text-align:center;margin-top:1rem;letter-spacing:1px;min-height:1.2rem}
+@keyframes pop{0%{transform:scale(0.8);opacity:0}60%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}
+.pop{animation:pop 0.4s ease forwards}
+</style>
+</head>
+<body>
+<div class="arena">
+  <div class="title">
+    <h1>Rock <span>Paper</span> Scissors</h1>
+    <p>On-chain · Stacks Mainnet</p>
+  </div>
+  <div class="wallet-bar">
+    <div class="addr" id="addr-display">No wallet connected</div>
+    <button class="connect-btn" id="connect-btn" onclick="connectWallet()">Connect</button>
+  </div>
+  <div class="scoreboard">
+    <div class="score-box wins"><div class="label">Wins</div><div class="value" id="score-wins">0</div></div>
+    <div class="score-box draws"><div class="label">Draws</div><div class="value" id="score-draws">0</div></div>
+    <div class="score-box losses"><div class="label">Losses</div><div class="value" id="score-losses">0</div></div>
+  </div>
+  <div class="battle-zone">
+    <div id="idle-view"><span class="idle-text">Choose your move</span></div>
+    <div class="battle-display" id="battle-view" style="display:none">
+      <div class="fighter"><span class="emoji" id="player-emoji">🪨</span><span class="name">You</span></div>
+      <div style="text-align:center"><div class="vs">VS</div><div class="result-badge" id="result-badge"></div></div>
+      <div class="fighter"><span class="emoji" id="contract-emoji">❓</span><span class="name">Contract</span></div>
+    </div>
+  </div>
+  <div class="moves">
+    <button class="move-btn" onclick="selectMove(0,this)"><span class="move-emoji">🪨</span><span class="move-name">Rock</span></button>
+    <button class="move-btn" onclick="selectMove(1,this)"><span class="move-emoji">📄</span><span class="move-name">Paper</span></button>
+    <button class="move-btn" onclick="selectMove(2,this)"><span class="move-emoji">✂️</span><span class="move-name">Scissors</span></button>
+  </div>
+  <button class="play-btn" id="play-btn" onclick="play()" disabled>Select a move to play</button>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+const CONTRACT_ADDRESS = 'SP7JHH38BKGBC4Y5TFB725EJFYSNEGHK6Z39X2B2';
+const CONTRACT_NAME = 'rock-paper-scissors-v3';
+const API = 'https://api.hiro.so';
+const API_KEY = '35bc698916c2e7bcff76fb311310e08d';
+const HEADERS = { 'Content-Type': 'application/json', 'x-api-key': API_KEY };
+const EMOJIS = ['🪨','📄','✂️'];
+const NAMES = ['Rock','Paper','Scissors'];
+let selectedMove = null, userAddress = null;
+
+function encodeAddress(addr) {
+  const alpha = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  let num = BigInt(0);
+  for (const c of addr) num = num * BigInt(58) + BigInt(alpha.indexOf(c));
+  let h = num.toString(16);
+  if (h.length % 2) h = '0' + h;
+  while (h.length < 50) h = '00' + h;
+  return '0x0516' + h.slice(2, 42);
+}
+
+function decodeTuple(hex) {
+  try {
+    const h = hex.startsWith('0x') ? hex.slice(2) : hex;
+    let i = 10;
+    const fields = {};
+    for (let f = 0; f < 3; f++) {
+      const nameLen = parseInt(h.slice(i, i+2), 16); i += 2;
+      let name = '';
+      for (let n = 0; n < nameLen; n++) {
+        name += String.fromCharCode(parseInt(h.slice(i, i+2), 16));
+        i += 2;
+      }
+      const valType = h.slice(i, i+2); i += 2;
+      if (valType === '01') { fields[name] = parseInt(h.slice(i, i+32), 16); i += 32; }
+    }
+    return fields;
+  } catch(e) { return null; }
+}
+
+function parseRepr(repr) {
+  try {
+    const pm = repr.match(/\(player u(\d+)\)/);
+    const cm = repr.match(/\(contract u(\d+)\)/);
+    const rm = repr.match(/\(result u(\d+)\)/);
+    if (pm && cm && rm) return { player: parseInt(pm[1]), contract: parseInt(cm[1]), result: parseInt(rm[1]) };
+  } catch(e) {}
+  return null;
+}
+
+function selectMove(move, btn) {
+  selectedMove = move;
+  document.querySelectorAll('.move-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const p = document.getElementById('play-btn');
+  p.disabled = false;
+  p.textContent = `Play ${NAMES[move]}`;
+}
+
+async function connectWallet() {
+  const provider = window.LeatherProvider || window.StacksProvider;
+  if (!provider) { setLog('Leather wallet not found — install from leather.io'); return; }
+  setLog('Requesting accounts...');
+  try {
+    const resp = await provider.request('getAddresses');
+    const addresses = resp?.result?.addresses || [];
+    const stx = addresses.find(a => a.address?.startsWith('SP')) || addresses.find(a => a.symbol === 'STX');
+    if (!stx) { setLog('No mainnet STX address found. Switch Leather to Mainnet.'); return; }
+    userAddress = stx.address;
+    const short = userAddress.slice(0,6) + '...' + userAddress.slice(-4);
+    document.getElementById('addr-display').innerHTML = `Connected: <span>${short}</span>`;
+    document.getElementById('connect-btn').textContent = 'Connected';
+    setLog('Connected!');
+    await fetchScore();
+  } catch(e) { setLog('Error: ' + e.message); }
+}
+
+async function fetchScore() {
+  if (!userAddress) return;
+  try {
+    const encoded = encodeAddress(userAddress);
+    const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify({ sender: userAddress, arguments: [encoded] })
+    });
+    const data = await res.json();
+    if (data.okay && data.result) {
+      const scores = decodeTuple(data.result);
+      if (scores) {
+        document.getElementById('score-wins').textContent = scores.wins || 0;
+        document.getElementById('score-losses').textContent = scores.losses || 0;
+        document.getElementById('score-draws').textContent = scores.draws || 0;
+      }
+    }
+  } catch(e) { console.log('fetchScore error', e); }
+}
+
+async function play() {
+  if (selectedMove === null) { setLog('Pick a move first!'); return; }
+  if (!userAddress) { setLog('Connect your wallet first!'); return; }
+  const provider = window.LeatherProvider || window.StacksProvider;
+  if (!provider) { setLog('Leather wallet not found!'); return; }
+  setLog('Confirm in Leather wallet...');
+  document.getElementById('play-btn').disabled = true;
+  showBattle(selectedMove, null, null);
+  const uintArg = '0x01' + selectedMove.toString(16).padStart(32, '0');
+  try {
+    const resp = await provider.request('stx_callContract', {
+      contract: `${CONTRACT_ADDRESS}.${CONTRACT_NAME}`,
+      functionName: 'play',
+      functionArgs: [uintArg],
+      network: 'mainnet',
+      postConditions: [],
+      postConditionMode: 'allow'
+    });
+    const txId = resp?.result?.txid || resp?.result?.txId;
+    if (txId) {
+      setLog('Tx submitted! Waiting for block...');
+      await pollTx(txId);
+    } else {
+      setLog('Cancelled.');
+      document.getElementById('play-btn').disabled = false;
+    }
+  } catch(e) {
+    setLog('Error: ' + (e.message || JSON.stringify(e)));
+    document.getElementById('play-btn').disabled = false;
+  }
+}
+
+async function pollTx(txId) {
+  for (let i = 0; i < 30; i++) {
+    await sleep(5000);
+    try {
+      const res = await fetch(`${API}/extended/v1/tx/${txId}`, { headers: HEADERS });
+      const data = await res.json();
+      if (data.tx_status === 'success') {
+        const repr = data?.tx_result?.repr || '';
+        const r = parseRepr(repr);
+        if (r) showBattle(r.player, r.contract, r.result);
+        await fetchScore();
+        const result = r?.result;
+        setLog(result === 1 ? '🎉 You win!' : result === 2 ? 'Contract wins.' : result === 0 ? 'Draw!' : 'Done!');
+        document.getElementById('play-btn').disabled = false;
+        return;
+      } else if (data.tx_status?.startsWith('abort')) {
+        setLog('Transaction aborted.');
+        document.getElementById('play-btn').disabled = false;
+        return;
+      }
+    } catch(e) {}
+    setLog(`Waiting for block... (${i+1}/30)`);
+  }
+  setLog('Timed out. Check explorer.');
+  document.getElementById('play-btn').disabled = false;
+}
+
+function showBattle(p, c, result) {
+  document.getElementById('idle-view').style.display = 'none';
+  document.getElementById('battle-view').style.display = 'flex';
+  document.getElementById('player-emoji').textContent = EMOJIS[p];
+  document.getElementById('contract-emoji').textContent = c !== null ? EMOJIS[c] : '❓';
+  ['player-emoji','contract-emoji'].forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  });
+  const badge = document.getElementById('result-badge');
+  if (result !== null && result !== undefined) {
+    badge.style.display = 'block';
+    badge.className = 'result-badge ' + (result === 1 ? 'win' : result === 2 ? 'lose' : 'draw');
+    badge.textContent = result === 1 ? 'You Win!' : result === 2 ? 'You Lose' : 'Draw';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function setLog(msg) { document.getElementById('log').textContent = msg; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
