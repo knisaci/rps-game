@@ -141,19 +141,18 @@ async function fetchScore() {
       body: JSON.stringify({ sender: userAddress, arguments: ['0x0516309ce2707bcf50611e0af3fedb8465c2be0373a3'] })
     });
     const data = await res.json();
-    console.log('RAW RESULT:', JSON.stringify(data));
-    if (data.result) {
-     const w = data.result.match(/wins:\s*u(\d+)/);
-     const l = data.result.match(/losses:\s*u(\d+)/);
-     const d = data.result.match(/draws:\s*u(\d+)/);
-      if (w) {
-        document.getElementById('score-wins').textContent = w[1];
-        document.getElementById('score-losses').textContent = l?.[1] || 0;
-        document.getElementById('score-draws').textContent = d?.[1] || 0;
-      }
+    if (data.okay && data.result) {
+      const hex = data.result.slice(2);
+      const wins = parseInt(hex.slice(hex.indexOf('77696e73') + 8 + 4, hex.indexOf('77696e73') + 8 + 4 + 32), 16);
+      const losses = parseInt(hex.slice(hex.indexOf('6c6f7373657373') + 14 + 4, hex.indexOf('6c6f7373657373') + 14 + 4 + 32), 16);
+      const draws = parseInt(hex.slice(hex.indexOf('6472617773') + 10 + 4, hex.indexOf('6472617773') + 10 + 4 + 32), 16);
+      document.getElementById('score-wins').textContent = wins;
+      document.getElementById('score-losses').textContent = losses;
+      document.getElementById('score-draws').textContent = draws;
     }
-  } catch(e) {}
+  } catch(e) { console.log('fetchScore error', e); }
 }
+
 
 async function play() {
   if (selectedMove === null) { setLog('Pick a move first!'); return; }
