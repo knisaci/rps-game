@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rock Paper Scissors — On-Chain</title>
-<script src="https://unpkg.com/@stacks/connect@7.10.1/dist/connect.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -84,15 +83,23 @@ body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:1
   <button class="play-btn" id="play-btn" onclick="play()" disabled>Select a move to play</button>
   <div class="log" id="log"></div>
 </div>
-<script>
+
+<script type="module">
+import { AppConfig, UserSession, showConnect, openContractCall } from 'https://esm.sh/@stacks/connect@7.10.1';
+import { uintCV } from 'https://esm.sh/@stacks/transactions@6.16.1';
+
 const CONTRACT_ADDRESS='ST7JHH38BKGBC4Y5TFB725EJFYSNEGHK6XFB84AC';
 const CONTRACT_NAME='rock-paper-scissors';
 const API='https://api.testnet.hiro.so';
 const EMOJIS=['🪨','📄','✂️'];
 const NAMES=['Rock','Paper','Scissors'];
-let selectedMove=null,userAddress=null;
 
-function selectMove(move,btn){
+const appConfig = new AppConfig(['store_write','publish_data']);
+const userSession = new UserSession({ appConfig });
+
+let selectedMove=null, userAddress=null;
+
+window.selectMove = function(move, btn) {
   selectedMove=move;
   document.querySelectorAll('.move-btn').forEach(b=>b.classList.remove('selected'));
   btn.classList.add('selected');
@@ -101,35 +108,33 @@ function selectMove(move,btn){
   p.textContent=`Play ${NAMES[move]}`;
 }
 
-async function connectWallet(){
-  setLog('Connecting...');
-  try {
-    const {showConnect} = window.StacksConnect;
-    showConnect({
-      appDetails:{name:'RPS Game',icon:window.location.origin+'/favicon.ico'},
-      onFinish:(data)=>{
-        userAddress=data.userSession.loadUserData().profile.stxAddress.testnet;
-        const short=userAddress.slice(0,6)+'...'+userAddress.slice(-4);
-        document.getElementById('addr-display').innerHTML=`Connected: <span>${short}</span>`;
-        document.getElementById('connect-btn').textContent='Connected';
-        setLog('Connected! Fetching score...');
-        fetchScore();
-      },
-      onCancel:()=>setLog('Connection cancelled.'),
-      userSession: new window.StacksConnect.UserSession({appConfig: new window.StacksConnect.AppConfig(['store_write','publish_data'])})
-    });
-  } catch(e){ setLog('Error: '+e.message); }
+window.connectWallet = function() {
+  setLog('Opening wallet...');
+  showConnect({
+    appDetails:{name:'RPS Game', icon:'https://knisaci.github.io/rps-game/favicon.ico'},
+    userSession,
+    onFinish: () => {
+      const userData = userSession.loadUserData();
+      userAddress = userData.profile.stxAddress.testnet;
+      const short = userAddress.slice(0,6)+'...'+userAddress.slice(-4);
+      document.getElementById('addr-display').innerHTML=`Connected: <span>${short}</span>`;
+      document.getElementById('connect-btn').textContent='Connected';
+      setLog('Connected! Fetching score...');
+      fetchScore();
+    },
+    onCancel: () => setLog('Cancelled.')
+  });
 }
 
-async function fetchScore(){
-  if(!userAddress)return;
-  try{
-    const res=await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`,{
+async function fetchScore() {
+  if(!userAddress) return;
+  try {
+    const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({sender:userAddress,arguments:[]})
+      body:JSON.stringify({sender:userAddress, arguments:[]})
     });
-    const data=await res.json();
+    const data = await res.json();
     if(data.result){
       const w=data.result.match(/wins:\su(\d+)/);
       const l=data.result.match(/losses:\su(\d+)/);
@@ -140,41 +145,36 @@ async function fetchScore(){
         document.getElementById('score-draws').textContent=d?.[1]||0;
       }
     }
-  }catch(e){}
+  } catch(e) { setLog('Could not fetch score.'); }
 }
 
-async function play(){
+window.play = async function() {
   if(selectedMove===null){setLog('Pick a move first!');return;}
   if(!userAddress){setLog('Connect your wallet first!');return;}
   setLog('Opening wallet to confirm...');
   document.getElementById('play-btn').disabled=true;
-  showBattle(selectedMove,null,null);
-  try{
-    const {openContractCall} = window.StacksConnect;
-    const {uintCV, makeStandardSTXPostCondition, FungibleConditionCode} = window.StacksConnect;
-    openContractCall({
-      network:'testnet',
-      contractAddress:CONTRACT_ADDRESS,
-      contractName:CONTRACT_NAME,
-      functionName:'play',
-      functionArgs:[uintCV(selectedMove)],
-      postConditions:[],
-      onFinish:(data)=>{
-        setLog(`Tx submitted: ${data.txId.slice(0,16)}... waiting for block...`);
-        pollTx(data.txId);
-      },
-      onCancel:()=>{
-        setLog('Transaction cancelled.');
-        document.getElementById('play-btn').disabled=false;
-      }
-    });
-  }catch(e){
-    setLog('Error: '+e.message);
-    document.getElementById('play-btn').disabled=false;
-  }
+  showBattle(selectedMove, null, null);
+
+  openContractCall({
+    network: 'testnet',
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: CONTRACT_NAME,
+    functionName: 'play',
+    functionArgs: [uintCV(selectedMove)],
+    postConditions: [],
+    userSession,
+    onFinish: (data) => {
+      setLog(`Tx: ${data.txId.slice(0,16)}... waiting for block...`);
+      pollTx(data.txId);
+    },
+    onCancel: () => {
+      setLog('Transaction cancelled.');
+      document.getElementById('play-btn').disabled=false;
+    }
+  });
 }
 
-async function pollTx(txId){
+async function pollTx(txId) {
   for(let i=0;i<30;i++){
     await sleep(5000);
     try{
@@ -182,17 +182,17 @@ async function pollTx(txId){
       const data=await res.json();
       if(data.tx_status==='success'){
         const r=parseResult(data);
-        if(r)showBattle(selectedMove,r.contract,r.result);
+        if(r) showBattle(selectedMove,r.contract,r.result);
         await fetchScore();
         setLog('Done! '+(r?.result===1?'🎉 You win!':r?.result===2?'Contract wins.':'Draw!'));
         document.getElementById('play-btn').disabled=false;
         return;
-      }else if(data.tx_status?.startsWith('abort')){
+      } else if(data.tx_status?.startsWith('abort')){
         setLog('Transaction aborted.');
         document.getElementById('play-btn').disabled=false;
         return;
       }
-    }catch(e){}
+    } catch(e){}
     setLog(`Waiting for block... (${i+1}/30)`);
   }
   setLog('Timed out. Check explorer.');
@@ -205,7 +205,7 @@ function parseResult(d){
     const p=r.match(/player:\su(\d)/);
     const c=r.match(/contract:\su(\d)/);
     const res=r.match(/result:\su(\d)/);
-    if(p&&c&&res)return{player:parseInt(p[1]),contract:parseInt(c[1]),result:parseInt(res[1])};
+    if(p&&c&&res) return{player:parseInt(p[1]),contract:parseInt(c[1]),result:parseInt(res[1])};
   }catch(e){}
   return null;
 }
@@ -226,7 +226,7 @@ function showBattle(p,c,result){
     badge.style.display='block';
     badge.className='result-badge '+(result===1?'win':result===2?'lose':'draw');
     badge.textContent=result===1?'You Win!':result===2?'You Lose':'Draw';
-  }else badge.style.display='none';
+  } else badge.style.display='none';
 }
 
 function setLog(msg){document.getElementById('log').textContent=msg;}
