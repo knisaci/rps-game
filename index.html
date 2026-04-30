@@ -91,11 +91,9 @@ const CONTRACT_ADDRESS = 'SP7JHH38BKGBC4Y5TFB725EJFYSNEGHK6Z39X2B2';
 const CONTRACT_NAME = 'rock-paper-scissors-v2';
 const API = 'https://api.hiro.so';
 const EMOJIS = ['🪨','📄','✂️'];
-console.log("PROVIDERS:", Object.keys(window).filter(k => k.toLowerCase().includes("leather") || k.toLowerCase().includes("stacks") || k.toLowerCase().includes("provider")));
 const NAMES = ['Rock','Paper','Scissors'];
 let selectedMove = null, userAddress = null;
 
-// Encode STX address as Clarity principal hex
 function encodeAddress(addr) {
   const alpha = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   let num = BigInt(0);
@@ -103,33 +101,31 @@ function encodeAddress(addr) {
   let h = num.toString(16);
   if (h.length % 2) h = '0' + h;
   while (h.length < 50) h = '00' + h;
-  // bytes 1-20 (skip version byte 0, skip 4 checksum bytes at end)
-  const hash160 = h.slice(2, 42);
-  return '0x0516' + hash160;
+  return '0x0516' + h.slice(2, 42);
 }
 
 // Decode Clarity tuple hex into {wins, losses, draws}
 function decodeTuple(hex) {
   try {
     const h = hex.startsWith('0x') ? hex.slice(2) : hex;
-    let i = 10; // skip type (0c) + field count (00000003)
+    let i = 10; // skip 0c (tuple) + 00000003 (3 fields)
     const fields = {};
     for (let f = 0; f < 3; f++) {
       const nameLen = parseInt(h.slice(i, i+2), 16); i += 2;
-      const name = atob ? '' : '';
-      let nameStr = '';
+      let name = '';
       for (let n = 0; n < nameLen; n++) {
-        nameStr += String.fromCharCode(parseInt(h.slice(i, i+2), 16));
+        name += String.fromCharCode(parseInt(h.slice(i, i+2), 16));
         i += 2;
       }
       const valType = h.slice(i, i+2); i += 2;
-      if (valType === '01') { // uint128
-        fields[nameStr] = parseInt(h.slice(i, i+32), 16);
+      if (valType === '01') {
+        fields[name] = parseInt(h.slice(i, i+32), 16);
         i += 32;
       }
     }
+    console.log('Decoded scores:', fields);
     return fields;
-  } catch(e) { return null; }
+  } catch(e) { console.log('decodeTuple error:', e); return null; }
 }
 
 function selectMove(move, btn) {
@@ -147,10 +143,13 @@ async function connectWallet() {
   setLog('Requesting accounts...');
   try {
     const resp = await provider.request('getAddresses');
+    console.log('getAddresses response:', JSON.stringify(resp));
     const addresses = resp?.result?.addresses || [];
-    const stx = addresses.find(a => a.address?.startsWith('ST')) || addresses.find(a => a.symbol === 'STX');
-    if (!stx) { setLog('No testnet address found. Switch Leather to Testnet.'); return; }
+    const stx = addresses.find(a => a.address?.startsWith('SP')) || addresses.find(a => a.symbol === 'STX');
+    if (!stx) { setLog('No mainnet STX address found. Switch Leather to Mainnet.'); return; }
     userAddress = stx.address;
+    console.log('Connected address:', userAddress);
+    console.log('Encoded:', encodeAddress(userAddress));
     const short = userAddress.slice(0,6) + '...' + userAddress.slice(-4);
     document.getElementById('addr-display').innerHTML = `Connected: <span>${short}</span>`;
     document.getElementById('connect-btn').textContent = 'Connected';
@@ -163,12 +162,14 @@ async function fetchScore() {
   if (!userAddress) return;
   try {
     const encoded = encodeAddress(userAddress);
+    console.log('Fetching score for:', userAddress, 'encoded:', encoded);
     const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sender: userAddress, arguments: [encoded] })
     });
     const data = await res.json();
+    console.log('Score API response:', JSON.stringify(data));
     if (data.okay && data.result) {
       const scores = decodeTuple(data.result);
       if (scores) {
@@ -188,7 +189,6 @@ async function play() {
   setLog('Confirm in Leather wallet...');
   document.getElementById('play-btn').disabled = true;
   showBattle(selectedMove, null, null);
-  // encode uint: 0x01 + 16 bytes big-endian
   const uintArg = '0x01' + selectedMove.toString(16).padStart(32, '0');
   try {
     const resp = await provider.request('stx_callContract', {
@@ -199,6 +199,7 @@ async function play() {
       postConditions: [],
       postConditionMode: 'allow'
     });
+    console.log('stx_callContract response:', JSON.stringify(resp));
     const txId = resp?.result?.txid || resp?.result?.txId;
     if (txId) {
       setLog('Tx submitted! Waiting for block...');
@@ -219,11 +220,21 @@ async function pollTx(txId) {
     try {
       const res = await fetch(`${API}/extended/v1/tx/${txId}`);
       const data = await res.json();
+      console.log('TX status:', data.tx_status, 'repr:', data?.tx_result?.repr);
       if (data.tx_status === 'success') {
-        const r = parseResult(data);
-        if (r) showBattle(selectedMove, r.contract, r.result);
+        const repr = data?.tx_result?.repr || '';
+        console.log('Full repr:', repr);
+        // parse (ok {player: u0, contract: u2, result: u1})
+        const pm = repr.match(/player:\s*u(\d+)/);
+        const cm = repr.match(/contract:\s*u(\d+)/);
+        const rm = repr.match(/result:\s*u(\d+)/);
+        console.log('Parsed - player:', pm?.[1], 'contract:', cm?.[1], 'result:', rm?.[1]);
+        if (pm && cm && rm) {
+          showBattle(parseInt(pm[1]), parseInt(cm[1]), parseInt(rm[1]));
+        }
         await fetchScore();
-        setLog(r?.result === 1 ? '🎉 You win!' : r?.result === 2 ? 'Contract wins.' : 'Draw!');
+        const result = rm ? parseInt(rm[1]) : -1;
+        setLog(result === 1 ? '🎉 You win!' : result === 2 ? 'Contract wins.' : result === 0 ? 'Draw!' : 'Done!');
         document.getElementById('play-btn').disabled = false;
         return;
       } else if (data.tx_status?.startsWith('abort')) {
@@ -231,22 +242,11 @@ async function pollTx(txId) {
         document.getElementById('play-btn').disabled = false;
         return;
       }
-    } catch(e) {}
+    } catch(e) { console.log('pollTx error:', e); }
     setLog(`Waiting for block... (${i+1}/30)`);
   }
   setLog('Timed out. Check explorer.');
   document.getElementById('play-btn').disabled = false;
-}
-
-function parseResult(d) {
-  try {
-    const repr = d?.tx_result?.repr || '';
-    const p = repr.match(/player:\su(\d)/);
-    const c = repr.match(/contract:\su(\d)/);
-    const r = repr.match(/result:\su(\d)/);
-    if (p && c && r) return { player: parseInt(p[1]), contract: parseInt(c[1]), result: parseInt(r[1]) };
-  } catch(e) {}
-  return null;
 }
 
 function showBattle(p, c, result) {
@@ -261,7 +261,7 @@ function showBattle(p, c, result) {
     el.classList.add('pop');
   });
   const badge = document.getElementById('result-badge');
-  if (result !== null) {
+  if (result !== null && result !== undefined) {
     badge.style.display = 'block';
     badge.className = 'result-badge ' + (result === 1 ? 'win' : result === 2 ? 'lose' : 'draw');
     badge.textContent = result === 1 ? 'You Win!' : result === 2 ? 'You Lose' : 'Draw';
