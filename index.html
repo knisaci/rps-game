@@ -91,48 +91,15 @@ const CONTRACT_ADDRESS = 'SP7JHH38BKGBC4Y5TFB725EJFYSNEGHK6Z39X2B2';
 const CONTRACT_NAME = 'rock-paper-scissors-v3';
 const API = 'https://api.hiro.so';
 const API_KEY = '35bc698916c2e7bcff76fb311310e08d';
-const HEADERS = { 'Content-Type': 'application/json', 'x-api-key': API_KEY };
 const EMOJIS = ['🪨','📄','✂️'];
 const NAMES = ['Rock','Paper','Scissors'];
 let selectedMove = null, userAddress = null;
+let wins = 0, losses = 0, draws = 0;
 
-function encodeAddress(addr) {
-  const alpha = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
-  let num = BigInt(0);
-  for (const c of addr) num = num * BigInt(58) + BigInt(alpha.indexOf(c));
-  let h = num.toString(16);
-  if (h.length % 2) h = '0' + h;
-  while (h.length < 50) h = '00' + h;
-  return '0x0516' + h.slice(2, 42);
-}
-
-function decodeTuple(hex) {
-  try {
-    const h = hex.startsWith('0x') ? hex.slice(2) : hex;
-    let i = 10;
-    const fields = {};
-    for (let f = 0; f < 3; f++) {
-      const nameLen = parseInt(h.slice(i, i+2), 16); i += 2;
-      let name = '';
-      for (let n = 0; n < nameLen; n++) {
-        name += String.fromCharCode(parseInt(h.slice(i, i+2), 16));
-        i += 2;
-      }
-      const valType = h.slice(i, i+2); i += 2;
-      if (valType === '01') { fields[name] = parseInt(h.slice(i, i+32), 16); i += 32; }
-    }
-    return fields;
-  } catch(e) { return null; }
-}
-
-function parseRepr(repr) {
-  try {
-    const pm = repr.match(/\(player u(\d+)\)/);
-    const cm = repr.match(/\(contract u(\d+)\)/);
-    const rm = repr.match(/\(result u(\d+)\)/);
-    if (pm && cm && rm) return { player: parseInt(pm[1]), contract: parseInt(cm[1]), result: parseInt(rm[1]) };
-  } catch(e) {}
-  return null;
+function updateScoreDisplay() {
+  document.getElementById('score-wins').textContent = wins;
+  document.getElementById('score-losses').textContent = losses;
+  document.getElementById('score-draws').textContent = draws;
 }
 
 function selectMove(move, btn) {
@@ -157,30 +124,8 @@ async function connectWallet() {
     const short = userAddress.slice(0,6) + '...' + userAddress.slice(-4);
     document.getElementById('addr-display').innerHTML = `Connected: <span>${short}</span>`;
     document.getElementById('connect-btn').textContent = 'Connected';
-    setLog('Connected!');
-    await fetchScore();
+    setLog('Connected! Ready to play.');
   } catch(e) { setLog('Error: ' + e.message); }
-}
-
-async function fetchScore() {
-  if (!userAddress) return;
-  try {
-    const encoded = encodeAddress(userAddress);
-    const res = await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`, {
-      method: 'POST',
-      headers: HEADERS,
-      body: JSON.stringify({ sender: userAddress, arguments: [encoded] })
-    });
-    const data = await res.json();
-    if (data.okay && data.result) {
-      const scores = decodeTuple(data.result);
-      if (scores) {
-        document.getElementById('score-wins').textContent = scores.wins || 0;
-        document.getElementById('score-losses').textContent = scores.losses || 0;
-        document.getElementById('score-draws').textContent = scores.draws || 0;
-      }
-    }
-  } catch(e) { console.log('fetchScore error', e); }
 }
 
 async function play() {
@@ -219,15 +164,28 @@ async function pollTx(txId) {
   for (let i = 0; i < 30; i++) {
     await sleep(5000);
     try {
-      const res = await fetch(`${API}/extended/v1/tx/${txId}`, { headers: HEADERS });
+      const res = await fetch(`${API}/extended/v1/tx/${txId}`, {
+        headers: { 'x-api-key': API_KEY }
+      });
       const data = await res.json();
       if (data.tx_status === 'success') {
         const repr = data?.tx_result?.repr || '';
-        const r = parseRepr(repr);
-        if (r) showBattle(r.player, r.contract, r.result);
-        await fetchScore();
-        const result = r?.result;
-        setLog(result === 1 ? '🎉 You win!' : result === 2 ? 'Contract wins.' : result === 0 ? 'Draw!' : 'Done!');
+        const pm = repr.match(/\(player u(\d+)\)/);
+        const cm = repr.match(/\(contract u(\d+)\)/);
+        const rm = repr.match(/\(result u(\d+)\)/);
+        if (pm && cm && rm) {
+          const p = parseInt(pm[1]);
+          const c = parseInt(cm[1]);
+          const r = parseInt(rm[1]);
+          showBattle(p, c, r);
+          if (r === 1) wins++;
+          else if (r === 2) losses++;
+          else draws++;
+          updateScoreDisplay();
+          setLog(r === 1 ? '🎉 You win!' : r === 2 ? 'Contract wins.' : 'Draw!');
+        } else {
+          setLog('Done!');
+        }
         document.getElementById('play-btn').disabled = false;
         return;
       } else if (data.tx_status?.startsWith('abort')) {
