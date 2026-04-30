@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Rock Paper Scissors — On-Chain</title>
+<script src="https://unpkg.com/@stacks/connect@7.10.1/dist/connect.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
 *{box-sizing:border-box;margin:0;padding:0}
@@ -20,7 +21,7 @@ body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:1
 .score-box.wins .value{color:#7fff6e}
 .score-box.losses .value{color:#ff6e6e}
 .score-box.draws .value{color:#6ebbff}
-.battle-zone{background:#111118;border:1px solid #1e1e2e;border-radius:16px;padding:1.5rem;margin-bottom:1.5rem;min-height:120px;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+.battle-zone{background:#111118;border:1px solid #1e1e2e;border-radius:16px;padding:1.5rem;margin-bottom:1.5rem;min-height:120px;display:flex;align-items:center;justify-content:center}
 .battle-display{display:flex;align-items:center;gap:1.5rem;width:100%;justify-content:center}
 .fighter{text-align:center;flex:1}
 .fighter .emoji{font-size:3rem;display:block;margin-bottom:0.5rem}
@@ -47,7 +48,7 @@ body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:1
 .wallet-bar .addr span{color:#7fff6e}
 .connect-btn{background:transparent;border:1px solid #7fff6e44;color:#7fff6e;border-radius:8px;padding:0.3rem 0.8rem;font-family:'Space Mono',monospace;font-size:0.65rem;cursor:pointer;letter-spacing:1px;text-transform:uppercase;transition:all 0.15s}
 .connect-btn:hover{background:#7fff6e11}
-.log{font-family:'Space Mono',monospace;font-size:0.65rem;color:#333;text-align:center;margin-top:1rem;letter-spacing:1px}
+.log{font-family:'Space Mono',monospace;font-size:0.65rem;color:#555;text-align:center;margin-top:1rem;letter-spacing:1px;min-height:1.2rem}
 @keyframes pop{0%{transform:scale(0.8);opacity:0}60%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}
 .pop{animation:pop 0.4s ease forwards}
 </style>
@@ -86,20 +87,150 @@ body{font-family:'Syne',sans-serif;background:#0a0a0f;color:#e8e8f0;min-height:1
 <script>
 const CONTRACT_ADDRESS='ST7JHH38BKGBC4Y5TFB725EJFYSNEGHK6XFB84AC';
 const CONTRACT_NAME='rock-paper-scissors';
-const NETWORK='testnet';
 const API='https://api.testnet.hiro.so';
 const EMOJIS=['🪨','📄','✂️'];
 const NAMES=['Rock','Paper','Scissors'];
-let selectedMove=null,connected=false,userAddress=null;
-function selectMove(move,btn){selectedMove=move;document.querySelectorAll('.move-btn').forEach(b=>b.classList.remove('selected'));btn.classList.add('selected');const p=document.getElementById('play-btn');p.disabled=false;p.textContent=`Play ${NAMES[move]}`}
-async function connectWallet(){setLog('Connecting to Leather wallet...');try{const provider=window.LeatherProvider||window.StacksProvider;if(!provider){setLog('Leather wallet not found. Install from leather.io');return}const response=await provider.request('getAddresses');const addrs=response?.result?.addresses||[];const stxAddr=addrs.find(a=>a.symbol==='STX');if(stxAddr){userAddress=stxAddr.address;connected=true;const short=userAddress.slice(0,6)+'...'+userAddress.slice(-4);document.getElementById('addr-display').innerHTML=`Connected: <span>${short}</span>`;document.getElementById('connect-btn').textContent='Connected';setLog('Fetching scores...');await fetchScore()}}catch(e){setLog('Could not connect: '+e.message)}}
-async function fetchScore(){if(!userAddress)return;try{const res=await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:userAddress,arguments:[]})});const data=await res.json();if(data.result){const w=data.result.match(/wins:\s*u(\d+)/);const l=data.result.match(/losses:\s*u(\d+)/);const d=data.result.match(/draws:\s*u(\d+)/);if(w){document.getElementById('score-wins').textContent=w[1];document.getElementById('score-losses').textContent=l?.[1]||0;document.getElementById('score-draws').textContent=d?.[1]||0}}}catch(e){}}
-async function play(){if(selectedMove===null||!connected){setLog('Connect wallet and select a move!');return}setLog('Submitting transaction...');document.getElementById('play-btn').disabled=true;showBattle(selectedMove,null,null);try{const provider=window.LeatherProvider||window.StacksProvider;const response=await provider.request('stx_callContract',{contract:`${CONTRACT_ADDRESS}.${CONTRACT_NAME}`,functionName:'play',functionArgs:[`0x010000000000000000000000000000000${selectedMove}`],network:NETWORK});if(response?.result?.txId){setLog(`Tx: ${response.result.txId.slice(0,16)}... waiting...`);await pollTx(response.result.txId)}else{setLog('Cancelled.');document.getElementById('play-btn').disabled=false}}catch(e){setLog('Error: '+(e.message||'unknown'));document.getElementById('play-btn').disabled=false}}
-async function pollTx(txId){for(let i=0;i<30;i++){await sleep(5000);try{const res=await fetch(`${API}/extended/v1/tx/${txId}`);const data=await res.json();if(data.tx_status==='success'){const r=parseResult(data);if(r)showBattle(selectedMove,r.contract,r.result);await fetchScore();setLog('Confirmed! '+(r?.result===1?'You win!':r?.result===2?'Contract wins.':'Draw!'));document.getElementById('play-btn').disabled=false;return}else if(data.tx_status?.startsWith('abort')){setLog('Aborted.');document.getElementById('play-btn').disabled=false;return}}catch(e){}setLog(`Waiting... (${i+1}/30)`)}}
-function parseResult(d){try{const r=d?.tx_result?.repr||'';const p=r.match(/player:\s*u(\d)/);const c=r.match(/contract:\s*u(\d)/);const res=r.match(/result:\s*u(\d)/);if(p&&c&&res)return{player:parseInt(p[1]),contract:parseInt(c[1]),result:parseInt(res[1])}}catch(e){}return null}
-function showBattle(p,c,result){document.getElementById('idle-view').style.display='none';document.getElementById('battle-view').style.display='flex';document.getElementById('player-emoji').textContent=EMOJIS[p];document.getElementById('contract-emoji').textContent=c!==null?EMOJIS[c]:'❓';['player-emoji','contract-emoji'].forEach(id=>{const el=document.getElementById(id);el.classList.remove('pop');void el.offsetWidth;el.classList.add('pop')});const badge=document.getElementById('result-badge');if(result!==null){badge.style.display='block';badge.className='result-badge '+(result===1?'win':result===2?'lose':'draw');badge.textContent=result===1?'You Win!':result===2?'You Lose':'Draw'}else badge.style.display='none'}
-function setLog(msg){document.getElementById('log').textContent=msg}
-function sleep(ms){return new Promise(r=>setTimeout(r,ms))}
+let selectedMove=null,userAddress=null;
+
+function selectMove(move,btn){
+  selectedMove=move;
+  document.querySelectorAll('.move-btn').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  const p=document.getElementById('play-btn');
+  p.disabled=false;
+  p.textContent=`Play ${NAMES[move]}`;
+}
+
+async function connectWallet(){
+  setLog('Connecting...');
+  try {
+    const {showConnect} = window.StacksConnect;
+    showConnect({
+      appDetails:{name:'RPS Game',icon:window.location.origin+'/favicon.ico'},
+      onFinish:(data)=>{
+        userAddress=data.userSession.loadUserData().profile.stxAddress.testnet;
+        const short=userAddress.slice(0,6)+'...'+userAddress.slice(-4);
+        document.getElementById('addr-display').innerHTML=`Connected: <span>${short}</span>`;
+        document.getElementById('connect-btn').textContent='Connected';
+        setLog('Connected! Fetching score...');
+        fetchScore();
+      },
+      onCancel:()=>setLog('Connection cancelled.'),
+      userSession: new window.StacksConnect.UserSession({appConfig: new window.StacksConnect.AppConfig(['store_write','publish_data'])})
+    });
+  } catch(e){ setLog('Error: '+e.message); }
+}
+
+async function fetchScore(){
+  if(!userAddress)return;
+  try{
+    const res=await fetch(`${API}/v2/contracts/call-read/${CONTRACT_ADDRESS}/${CONTRACT_NAME}/get-score`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sender:userAddress,arguments:[]})
+    });
+    const data=await res.json();
+    if(data.result){
+      const w=data.result.match(/wins:\su(\d+)/);
+      const l=data.result.match(/losses:\su(\d+)/);
+      const d=data.result.match(/draws:\su(\d+)/);
+      if(w){
+        document.getElementById('score-wins').textContent=w[1];
+        document.getElementById('score-losses').textContent=l?.[1]||0;
+        document.getElementById('score-draws').textContent=d?.[1]||0;
+      }
+    }
+  }catch(e){}
+}
+
+async function play(){
+  if(selectedMove===null){setLog('Pick a move first!');return;}
+  if(!userAddress){setLog('Connect your wallet first!');return;}
+  setLog('Opening wallet to confirm...');
+  document.getElementById('play-btn').disabled=true;
+  showBattle(selectedMove,null,null);
+  try{
+    const {openContractCall} = window.StacksConnect;
+    const {uintCV, makeStandardSTXPostCondition, FungibleConditionCode} = window.StacksConnect;
+    openContractCall({
+      network:'testnet',
+      contractAddress:CONTRACT_ADDRESS,
+      contractName:CONTRACT_NAME,
+      functionName:'play',
+      functionArgs:[uintCV(selectedMove)],
+      postConditions:[],
+      onFinish:(data)=>{
+        setLog(`Tx submitted: ${data.txId.slice(0,16)}... waiting for block...`);
+        pollTx(data.txId);
+      },
+      onCancel:()=>{
+        setLog('Transaction cancelled.');
+        document.getElementById('play-btn').disabled=false;
+      }
+    });
+  }catch(e){
+    setLog('Error: '+e.message);
+    document.getElementById('play-btn').disabled=false;
+  }
+}
+
+async function pollTx(txId){
+  for(let i=0;i<30;i++){
+    await sleep(5000);
+    try{
+      const res=await fetch(`${API}/extended/v1/tx/${txId}`);
+      const data=await res.json();
+      if(data.tx_status==='success'){
+        const r=parseResult(data);
+        if(r)showBattle(selectedMove,r.contract,r.result);
+        await fetchScore();
+        setLog('Done! '+(r?.result===1?'🎉 You win!':r?.result===2?'Contract wins.':'Draw!'));
+        document.getElementById('play-btn').disabled=false;
+        return;
+      }else if(data.tx_status?.startsWith('abort')){
+        setLog('Transaction aborted.');
+        document.getElementById('play-btn').disabled=false;
+        return;
+      }
+    }catch(e){}
+    setLog(`Waiting for block... (${i+1}/30)`);
+  }
+  setLog('Timed out. Check explorer.');
+  document.getElementById('play-btn').disabled=false;
+}
+
+function parseResult(d){
+  try{
+    const r=d?.tx_result?.repr||'';
+    const p=r.match(/player:\su(\d)/);
+    const c=r.match(/contract:\su(\d)/);
+    const res=r.match(/result:\su(\d)/);
+    if(p&&c&&res)return{player:parseInt(p[1]),contract:parseInt(c[1]),result:parseInt(res[1])};
+  }catch(e){}
+  return null;
+}
+
+function showBattle(p,c,result){
+  document.getElementById('idle-view').style.display='none';
+  document.getElementById('battle-view').style.display='flex';
+  document.getElementById('player-emoji').textContent=EMOJIS[p];
+  document.getElementById('contract-emoji').textContent=c!==null?EMOJIS[c]:'❓';
+  ['player-emoji','contract-emoji'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.classList.remove('pop');
+    void el.offsetWidth;
+    el.classList.add('pop');
+  });
+  const badge=document.getElementById('result-badge');
+  if(result!==null){
+    badge.style.display='block';
+    badge.className='result-badge '+(result===1?'win':result===2?'lose':'draw');
+    badge.textContent=result===1?'You Win!':result===2?'You Lose':'Draw';
+  }else badge.style.display='none';
+}
+
+function setLog(msg){document.getElementById('log').textContent=msg;}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 </script>
 </body>
 </html>
