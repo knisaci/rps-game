@@ -170,9 +170,8 @@ async function play() {
   const uintArg = '0x01' + moveHex;
 
   try {
-    const resp = await provider.request('stx_callContract', {
-      contractAddress: CONTRACT_ADDRESS,
-      contractName: CONTRACT_NAME,
+  const resp = await provider.request('stx_callContract', {
+      contract: `${CONTRACT_ADDRESS}.${CONTRACT_NAME}`,
       functionName: 'play',
       functionArgs: [uintArg],
       network: 'testnet',
